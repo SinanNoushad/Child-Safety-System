@@ -34,7 +34,7 @@ def trigger_alert(label, confidence, bbox):
     print(f"ALERT: Dangerous item '{label}' detected with confidence {confidence:.2f}")
 
 # Load ONNX model (update the path as needed)
-session = ort.InferenceSession(r"C:\Users\Sinan\Desktop\new_childsafety\models\yolov8n.onnx")
+session = ort.InferenceSession(r"C:\Users\kenjo\Documents\GitHub\Child-Safety-System\models\yolov8n.onnx")
 input_name = session.get_inputs()[0].name
 
 cap = cv2.VideoCapture(0)  # Use 0 for webcam
