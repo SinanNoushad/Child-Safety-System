@@ -1,9 +1,18 @@
 import cv2
 import numpy as np
-import onnxruntime as ort
+import torch
+from PIL import Image
+import torchvision.transforms as transforms
+import sys
+import os
+
+# Add YOLOv5 to path
+yolov5_path = r'C:\Users\kenjo\Documents\GitHub\Child-Safety-System\yolov5'
+if yolov5_path not in sys.path:
+    sys.path.append(yolov5_path)
 
 # Confidence threshold (adjust as needed)
-confidence_threshold = 0.3  # You can lower this value for testing
+confidence_threshold = 0.1  # Very low threshold for better detection
 
 # COCO class IDs and labels
 COCO_LABELS = {
@@ -24,120 +33,114 @@ COCO_LABELS = {
     80: 'teddy bear', 81: 'hair drier', 82: 'toothbrush'
 }
 
-# COCO class IDs for dangerous items
+# Simplify dangerous classes to focus on core items
 DANGEROUS_CLASSES = {
     46: 'knife',
-    79: 'scissors'
+    79: 'scissors',
+    39: 'baseball bat',
+    44: 'bottle',
+    81: 'hair drier'
 }
+
+# Remove detection history for immediate detection
+HISTORY_FRAMES = 1  # Set to 1 for immediate detection
 
 def trigger_alert(label, confidence, bbox):
     print(f"ALERT: Dangerous item '{label}' detected with confidence {confidence:.2f}")
 
-# Load ONNX model (update the path as needed)
-session = ort.InferenceSession(r"C:\Users\Sinan\Desktop\new_childsafety\models\yolov8n.onnx")
-input_name = session.get_inputs()[0].name
+# Load YOLOv5n model
+try:
+    model = torch.hub.load('ultralytics/yolov5', 'yolov5n', pretrained=True)
+    model.conf = confidence_threshold  # Set confidence threshold
+    print("Using YOLOv5n model from hub")
+except Exception as e:
+    print(f"Error loading YOLO model: {e}")
+    print("Please make sure you have installed the required packages:")
+    print("pip install torch torchvision")
+    print("pip install ultralytics")
+    exit()
 
-cap = cv2.VideoCapture(0)  # Use 0 for webcam
-
-if not cap.isOpened():
-    print("Error: Could not open video/webcam.")
+# Initialize camera with basic settings
+try:
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("Error: Could not open video/webcam.")
+        exit()
+    
+    # Set camera properties to basic values
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    cap.set(cv2.CAP_PROP_FPS, 30)
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+except Exception as e:
+    print(f"Error initializing camera: {e}")
     exit()
 
 while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break
+    try:
+        ret, frame = cap.read()
+        if not ret:
+            print("Error: Failed to grab frame")
+            break
 
-    original_height, original_width = frame.shape[:2]
-
-    # Preprocess: convert to RGB and letterbox to target size (e.g., 640x640)
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    target_size = 640
-
-    # Calculate scale for resizing while maintaining aspect ratio
-    scale = min(target_size / original_width, target_size / original_height)
-    resized_width = int(original_width * scale)
-    resized_height = int(original_height * scale)
-
-    resized_frame = cv2.resize(rgb_frame, (resized_width, resized_height))
-
-    # Create a new image of target size and center the resized frame
-    padded_frame = np.zeros((target_size, target_size, 3), dtype=np.uint8)
-    pad_width = (target_size - resized_width) // 2
-    pad_height = (target_size - resized_height) // 2
-    padded_frame[pad_height:pad_height+resized_height, pad_width:pad_width+resized_width] = resized_frame
-
-    # Normalize and prepare input tensor
-    input_image = padded_frame.astype(np.float32) / 255.0  # Normalize to [0,1]
-    input_tensor = np.expand_dims(input_image, axis=0)      # [1, 640, 640, 3]
-    input_tensor = np.transpose(input_tensor, (0, 3, 1, 2)) # [1, 3, 640, 640]
-
-    # Run inference
-    outputs = session.run(None, {input_name: input_tensor})
-    predictions = outputs[0]
-    detections = predictions[0]  # Assuming the output is [num_detections, 6]
-
-    detected_objects = []  # For overlaying labels
-
-    for detection in detections:
-        x1, y1, x2, y2, conf, cls = detection[:6]
-
-        if conf < confidence_threshold:
+        if frame is None:
+            print("Error: Frame is None")
             continue
 
-        # If coordinates are normalized between 0 and 1, scale them back to image size
-        if 0 <= x1 <= 1 and 0 <= y1 <= 1 and 0 <= x2 <= 1 and 0 <= y2 <= 1:
-            x1 *= target_size
-            y1 *= target_size
-            x2 *= target_size
-            y2 *= target_size
+        # Convert frame to RGB for YOLOv5
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        # Run YOLOv5 inference
+        results = model(frame_rgb)
+        
+        # Process detections
+        for det in results.xyxy[0]:  # xyxy format
+            x1, y1, x2, y2, conf, cls = det.cpu().numpy()
+            class_id = int(cls)
+            
+            # Convert to integers
+            x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+            
+            # Get label
+            label = COCO_LABELS.get(class_id, 'unknown')
+            
+            # Print all detections for debugging
+            print(f"\nDetection: {label}")
+            print(f"Confidence: {conf:.2f}")
+            print(f"Class ID: {class_id}")
+            print(f"Box coordinates: ({x1}, {y1}, {x2}, {y2})")
+            
+            # Choose color based on object type
+            if class_id in DANGEROUS_CLASSES:
+                box_color = (0, 0, 255)  # Red for dangerous items
+                text_color = (0, 0, 255)
+                trigger_alert(label, conf, (x1, y1, x2, y2))
+            else:
+                box_color = (0, 255, 0)  # Green for other objects
+                text_color = (0, 255, 0)
 
-        # Adjust for padding (subtract pad_width and pad_height)
-        x1 -= pad_width
-        y1 -= pad_height
-        x2 -= pad_width
-        y2 -= pad_height
+            # Draw bounding box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
 
-        # Scale coordinates back to original image dimensions
-        x1 = x1 / scale
-        y1 = y1 / scale
-        x2 = x2 / scale
-        y2 = y2 / scale
+            # Draw label and confidence
+            label_text = f"{label} ({conf:.2f})"
+            cv2.putText(frame, label_text, 
+                      (x1, y1 - 10 if y1 - 10 > 10 else y1 + 10),
+                      cv2.FONT_HERSHEY_SIMPLEX, 0.5, text_color, 2)
 
-        # Convert to integers
-        x1 = int(max(0, min(original_width - 1, x1)))
-        y1 = int(max(0, min(original_height - 1, y1)))
-        x2 = int(max(0, min(original_width - 1, x2)))
-        y2 = int(max(0, min(original_height - 1, y2)))
+        # Display frame
+        cv2.imshow('Object Detection', frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
 
-        label = COCO_LABELS.get(int(cls), 'unknown')
-        detected_objects.append(label)
+    except Exception as e:
+        print(f"Error in main loop: {e}")
+        continue
 
-        # Choose color based on object type
-        if int(cls) in DANGEROUS_CLASSES:
-            box_color = (0, 0, 255)  # Red for dangerous items
-            text_color = (0, 0, 255)
-            trigger_alert(label, conf, (x1, y1, x2, y2))
-        else:
-            box_color = (0, 255, 0)  # Green for other objects
-            text_color = (0, 255, 0)
-
-        # Draw bounding box
-        cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
-
-        # Draw label and confidence
-        label_text = f"{label} ({conf:.2f})"
-        cv2.putText(frame, label_text, (x1, y1 - 10 if y1 - 10 > 10 else y1 + 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, text_color, 2)
-
-    # Overlay unique detected objects on the top-left
-    if detected_objects:
-        overlay_text = "Detected: " + ", ".join(set(detected_objects))
-        cv2.putText(frame, overlay_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
-
-    cv2.imshow('Object Detection', frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-cap.release()
-cv2.destroyAllWindows()
+# Clean up
+try:
+    cap.release()
+    cv2.destroyAllWindows()
+except Exception as e:
+    print(f"Error during cleanup: {e}")
