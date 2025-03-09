@@ -96,7 +96,7 @@ else:
 
 # VIDEO_PATH = r"C:\Users\Sinan\Desktop\new_childsafety\test\test.mp4"
 VIDEO_PATH = 0
-PROCESS_EVERY_N_FRAMES = 2  # Process every other frame
+PROCESS_EVERY_N_FRAMES = 1  # Process every other frame
 SCALE_FACTOR = 0.5  # Reduced resolution for detection
 TRACKING_THRESHOLD = 0.4  # Lower threshold for tracking
 

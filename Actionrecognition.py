@@ -16,7 +16,7 @@ pose = mp_pose.Pose(min_detection_confidence=0.7, min_tracking_confidence=0.7)
 
 # Initialize Object Detector
 # model_path = r'C:\Users\Sinan\Desktop\new_childsafety\models\efficientdet_lite0.tflite'
-model_path = "C:\\Users\\kenjo\\Documents\\GitHub\\Child-Safety-System\\models\\efficientdet_lite0.tflite"
+model_path = r"C:\Users\Sinan\Desktop\child_safety\models\efficientdet_lite0.tflite"
 
 
 print(f"Model path exists: {os.path.exists(model_path)}")
